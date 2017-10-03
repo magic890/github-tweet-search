@@ -85,10 +85,13 @@ object SparkOperations extends App {
 
     val res: Option[util.List[Status]] =
       try {
-        Option(twitter.search(new Query(searchStr)).getTweets)
+        val tweets: util.List[Status] = twitter.search(new Query(searchStr)).getTweets
+        println(s"Found ${tweets.size()} tweets for '$searchStr'")
+        Option(tweets)
       }
       catch {
         case e: TwitterException => {
+          println(s"Unable to search tweets for '$searchStr'")
           System.err.println(e)
           None
         }
@@ -98,8 +101,6 @@ object SparkOperations extends App {
       case Some(r) => JavaConverters.collectionAsScalaIterableConverter(r).asScala.toSeq
       case None => Seq.empty
     }
-
-    println(s"Performed ${ret.size} Twitter searches for '$searchStr'")
 
     ret
   }
@@ -137,6 +138,8 @@ object SparkOperations extends App {
     val searchQuery: String = args.foldLeft("")((acc, arg) => acc + " " + arg).trim
 
     startStream(searchQuery)
+
+    SparkCommons.ss.close()
   }
 
 }
