@@ -1,21 +1,30 @@
 package com.matteoguarnerio.workday.spark
 
+import java.io.{File, PrintWriter}
+import java.util
+
 import com.matteoguarnerio.workday.SparkCommons
-import com.matteoguarnerio.workday.SparkCommons.ssc
+//import com.matteoguarnerio.workday.SparkCommons.ssc
+import com.matteoguarnerio.workday.model.{Repo, SearchResult, SearchResults, Tweet, User}
 import org.apache.http.HttpResponse
 import org.apache.http.client.config.RequestConfig
 import org.apache.http.client.methods.HttpGet
 import org.apache.http.impl.client.{CloseableHttpClient, HttpClientBuilder}
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{DataFrame, Dataset, Row}
-import org.apache.spark.streaming.dstream.{DStream, ReceiverInputDStream}
-import org.apache.spark.streaming.twitter.TwitterUtils
-import org.apache.spark.streaming.{Duration, Seconds}
-import twitter4j.{Query, Status}
-import twitter4j.api.SearchResource
+import org.apache.spark.sql.{DataFrame, Row}
+import org.apache.spark.sql.catalyst.expressions.GenericRowWithSchema
+import org.apache.spark.sql.types.{DataTypes, StructField}
+import twitter4j.{Query, Status, TwitterFactory}
 
+import scala.collection.{JavaConverters, immutable}
 import scala.concurrent.{Await, Future}
+import scala.collection.JavaConversions._
+import io.circe._
+import io.circe.syntax._
+
+import scala.io.Source
+
 
 object SparkOperations extends App {
 
@@ -24,7 +33,7 @@ object SparkOperations extends App {
 
   private val CONNECTION_TIMEOUT_MS: Int = 20000; // Timeout in millis (20 sec).
 
-  private def searchGitHubRepos(searchStr: String): Array[String] = {
+  private def searchGitHubRepos(searchStr: String): Array[Repo] = {
 
     // TODO: check searchStr encode with string with spaces
 
@@ -59,119 +68,66 @@ object SparkOperations extends App {
       SparkCommons.ss.createDataset(responsesStr)
     )
 
-    val repoFullNameRDD: RDD[Seq[String]] = repoDF
-      .select("items.full_name")
+    val repoRDD: RDD[Seq[(String, String, String)]] = repoDF
+      .select("items.full_name", "items.html_url", "items.description")
       .rdd
-      .map(row  => {
-          val a = row
+      .map(row => {
+        val fnL: Seq[String] = row.getSeq[String](0)
+        val huL: Seq[String] = row.getSeq[String](1)
+        val dL: Seq[String] = row.getSeq[String](2)
+        (fnL, huL, dL).zipped.toSeq
+      })
 
-        val z: Seq[String] = row.getSeq[String](0)
+    val r: Array[(String, String, String)] = repoRDD
+      .collect()
+      .flatten
 
-        z
-          //val afullname = row.getAs[List[String]]("full_name")
-         // row
-
-        }
-      )
-
-//    val d: Array[Seq[String]] = repoFullNameRDD.collect()
-//    val dm: Array[String] = d.flatten
-
-
-    // TODO: remove assignment and return
-    val test = repoFullNameRDD.collect().flatten
-    test
-  }
-
-
-  private def startStream(): Unit = {
-    // Github API Search
-    // for each `items` search for the `full_name` (e.g. component/reactive) that is the suffix of `html_url`
-    // in the response there is `total_count`
-
-    val repositories: Array[String] = searchGitHubRepos("reactive")
-
-    import twitter4j.QueryResult
-    import twitter4j.Twitter
-    import twitter4j.TwitterFactory
-    // The factory instance is re-useable and thread safe.// The factory instance is re-useable and thread safe.
-
-    val twitter = TwitterFactory.getSingleton
-
-    val q = Query("component/reactive")
-
-    val a = twitter.search(SearchResource(QueryResult("ciao")))
-
-    val query = twitter.search("source:twitter4j yusukey")
-    val result = twitter.search(query)
-    import scala.collection.JavaConversions._
-    for (status <- result.getTweets) {
-      System.out.println("@" + status.getUser.getScreenName + ":" + status.getText)
+    val t = r.map {
+      case (fn, hu, d) => Repo(fn, hu, d)
     }
 
+    t
+  }
 
-    val tweets: ReceiverInputDStream[Status] = TwitterUtils.createStream(SparkCommons.ssc, None, repositories)
+  private def searchTwitter(searchStr: String): Future[Seq[Status]] = Future {
+    val twitter = TwitterFactory.getSingleton
 
-    val duration: Duration = Seconds(3600)
+    val res: Seq[Status] = JavaConverters.collectionAsScalaIterableConverter(
+      twitter.search(new Query(searchStr)).getTweets
+    ).asScala.toSeq
 
-    // Print tweets batch count
-    tweets.foreachRDD(rdd => {
-//      val s = rdd.asInstanceOf[Status]
-//      println(s"${s.getCreatedAt} - ${s.getId}, ${s.getUser.getId}, ${s.getUser.getName}, ${s.getUser.getScreenName} - ${s.getText}")
-      println("\nNew tweets %s:".format(rdd.count()))
+    res
+  }
+
+  private def startStream(searchQuery: String): Unit = {
+    val repositories = searchGitHubRepos(searchQuery)
+
+    val twitterSearches: immutable.IndexedSeq[(Repo, Future[Seq[Status]])] = repositories.indices map(i => {
+      (repositories(i), searchTwitter(repositories(i).name))
     })
 
-    tweets.map(
-      s => println(s"${s.getCreatedAt} - ${s.getId}, ${s.getUser.getId}, ${s.getUser.getName}, ${s.getUser.getScreenName} - ${s.getText}")
-    )
+    val searchResults: immutable.IndexedSeq[SearchResult] = twitterSearches
+      .map { case (repo, tweets) =>
+        val ts = Await.result(tweets, scala.concurrent.duration.Duration.Inf)
+        val l = ts.map(t => Tweet(t.getCreatedAt.toString, t.getId, t.getText, t.isRetweet, User(t.getUser.getId, t.getUser.getName, t.getUser.getScreenName), t.getLang))
+        SearchResult(repo, l)
+      }
 
+    val result: SearchResults = SearchResults(searchQuery, searchResults)
+    val resultJson: Json = result.asJson
 
+    println(resultJson.spaces2)
 
-    //t.getCreatedAt, t.getId, t.getUser.getId, t.getUser.getName, t.getUser.getScreenName, t.getText
-
-    // Get users and followers count
-//    val users: DStream[(String, Int)] = tweets.map(status =>
-//      (status.getUser.getScreenName, status.getUser.getFollowersCount)
-//    )
-//
-//
-//    // Print top users
-//    val usersReduced = users.reduceByKeyAndWindow(_ + _, duration).map { case (user, count) => (count, user) }.transform(_.sortByKey(false))
-//    usersReduced.foreachRDD(rdd => {
-//      println("ReducedUsersCount= %s ".format(rdd.count()))
-//      val topUsers = rdd.take(10)
-//      topUsers.foreach { case (count, user) => println("%s (%s followers)".format(user, count)) }
-//    })
-//
-//    // Print popular hash tags
-//    val hashTags = tweets.flatMap(status => status.getText.split(" ").filter(_.startsWith("#")))
-//    val topHashTags = hashTags.map((_, 1))
-//      .reduceByKeyAndWindow(_ + _, duration)
-//      .map { case (topic, count) => (count, topic) }
-//      .transform(_.sortByKey(false))
-//
-//    topHashTags.foreachRDD(rdd => {
-//      val topList = rdd.take(10)
-//      println("\nPopular topics in last %s seconds (%s total):".format(duration, rdd.count()))
-//      topList.foreach { case (count, tag) => println("%s (%s tweets)".format(tag, count)) }
-//    })
-
-    ssc.start()
-    //ssc.awaitTermination(Minutes(300).milliseconds)
-    ssc.awaitTermination()
-    ssc.stop(true)
-
-    //  if (sc != null) {
-    //    sc.stop()
-    //  }
-
-    //  df.write.mode('append').json(yourtargetpath)
+    SparkCommons.writeToFile(s"output/${System.currentTimeMillis()}-$searchQuery.json", resultJson.noSpaces)
   }
 
   override def main(args: Array[String]): Unit = {
     Logger.getRootLogger.setLevel(Level.ERROR)
     SparkCommons.loadTwitterKeys()
-    startStream()
-    //searchGitHubRepos("reactive")
+
+    val searchQuery: String = args.foldLeft("")((acc, arg) => acc + " " + arg).trim
+
+    startStream(searchQuery)
   }
+
 }
