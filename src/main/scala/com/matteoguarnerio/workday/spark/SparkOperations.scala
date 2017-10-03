@@ -15,7 +15,6 @@ import twitter4j.{Query, Status, TwitterFactory}
 import scala.collection.{JavaConverters, immutable}
 import scala.concurrent.{Await, Future}
 
-
 object SparkOperations extends App {
 
   import SparkCommons.ss.implicits._
@@ -44,9 +43,8 @@ object SparkOperations extends App {
 
     val firstResponse: HttpResponse = Await.result(apiPaginationCall(1), scala.concurrent.duration.Duration.Inf)
 
-    // TODO: fix call counter
     val headers: Map[String, String] = firstResponse.getAllHeaders.map(h => h.getName -> h.getValue).toMap
-    val otherResponses: Seq[Future[HttpResponse]] = 2 until 3 map(i => { //headers.getOrElse("X-RateLimit-Limit", "10").toInt
+    val otherResponses: Seq[Future[HttpResponse]] = 2 until headers.getOrElse("X-RateLimit-Limit", "10").toInt map(i => {
       apiPaginationCall(i)
     })
 
