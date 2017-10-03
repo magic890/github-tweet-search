@@ -1,47 +1,36 @@
 package com.matteoguarnerio.workday.spark
 
-import java.io.{File, PrintWriter}
-import java.util
-
 import com.matteoguarnerio.workday.SparkCommons
-//import com.matteoguarnerio.workday.SparkCommons.ssc
 import com.matteoguarnerio.workday.model.{Repo, SearchResult, SearchResults, Tweet, User}
+import io.circe.syntax._
 import org.apache.http.HttpResponse
 import org.apache.http.client.config.RequestConfig
 import org.apache.http.client.methods.HttpGet
 import org.apache.http.impl.client.{CloseableHttpClient, HttpClientBuilder}
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{DataFrame, Row}
-import org.apache.spark.sql.catalyst.expressions.GenericRowWithSchema
-import org.apache.spark.sql.types.{DataTypes, StructField}
+import org.apache.spark.sql.DataFrame
 import twitter4j.{Query, Status, TwitterFactory}
 
 import scala.collection.{JavaConverters, immutable}
 import scala.concurrent.{Await, Future}
-import scala.collection.JavaConversions._
-import io.circe._
-import io.circe.syntax._
-
-import scala.io.Source
 
 
 object SparkOperations extends App {
 
-  import scala.concurrent.ExecutionContext.Implicits.global
   import SparkCommons.ss.implicits._
 
-  private val CONNECTION_TIMEOUT_MS: Int = 20000; // Timeout in millis (20 sec).
+  import scala.concurrent.ExecutionContext.Implicits.global
 
   private def searchGitHubRepos(searchStr: String): Array[Repo] = {
 
-    // TODO: check searchStr encode with string with spaces
-
     def apiPaginationCall(page: Int = 1): Future[HttpResponse] = Future {
+      val connectionTimeoutMs: Int = 20000
+
       val requestConfig = RequestConfig.custom()
-        .setConnectionRequestTimeout(CONNECTION_TIMEOUT_MS)
-        .setConnectTimeout(CONNECTION_TIMEOUT_MS)
-        .setSocketTimeout(CONNECTION_TIMEOUT_MS)
+        .setConnectionRequestTimeout(connectionTimeoutMs)
+        .setConnectTimeout(connectionTimeoutMs)
+        .setSocketTimeout(connectionTimeoutMs)
         .build()
       HttpClientBuilder.create().build()
 
@@ -78,15 +67,14 @@ object SparkOperations extends App {
         (fnL, huL, dL).zipped.toSeq
       })
 
-    val r: Array[(String, String, String)] = repoRDD
+    val res: Array[Repo] = repoRDD
       .collect()
       .flatten
+      .map {
+        case (fn, hu, d) => Repo(fn, hu, d)
+      }
 
-    val t = r.map {
-      case (fn, hu, d) => Repo(fn, hu, d)
-    }
-
-    t
+    res
   }
 
   private def searchTwitter(searchStr: String): Future[Seq[Status]] = Future {
@@ -114,11 +102,15 @@ object SparkOperations extends App {
       }
 
     val result: SearchResults = SearchResults(searchQuery, searchResults)
-    val resultJson: Json = result.asJson
+    val resultJsonStr: String = result.asJson.spaces2
 
-    println(resultJson.spaces2)
+    val savingPath: String = s"output/${System.currentTimeMillis()}-$searchQuery.json"
 
-    SparkCommons.writeToFile(s"output/${System.currentTimeMillis()}-$searchQuery.json", resultJson.noSpaces)
+    println("Result ---------> "+ savingPath)
+    println(resultJsonStr)
+    println("EOF ---------")
+
+    SparkCommons.writeToFile(savingPath, resultJsonStr)
   }
 
   override def main(args: Array[String]): Unit = {

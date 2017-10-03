@@ -1,12 +1,7 @@
 package com.matteoguarnerio.workday.model
 
-import io.circe._, io.circe.generic.semiauto._
-
-case class User(
-               id: Long,
-               name: String,
-               screenName: String
-               )
+import io.circe.{Decoder, Encoder, Json}
+import io.circe.generic.semiauto._
 
 case class Tweet(
                   createdAt: String,
@@ -15,14 +10,24 @@ case class Tweet(
                   isRetweet: Boolean,
                   username: User,
                   lang: String
-                )
-
-object User {
-  implicit val userDecoder: Decoder[User] = deriveDecoder[User]
-  implicit val userEncoder: Encoder[User] = deriveEncoder[User]
+                ) {
+  val url: String = s"https://twitter.com/${username.screenName}/status/$id"
 }
 
 object Tweet {
   implicit val tweetDecoder: Decoder[Tweet] = deriveDecoder[Tweet]
-  implicit val tweetEncoder: Encoder[Tweet] = deriveEncoder[Tweet]
+
+  implicit val tweetEncoder: Encoder[Tweet] = new Encoder[Tweet] {
+    final def apply(t: Tweet): Json = {
+      Json.obj(
+        ("createdAt", Json.fromString(t.createdAt)),
+        ("id", Json.fromLong(t.id)),
+        ("text", Json.fromString(t.text)),
+        ("isRetweet", Json.fromBoolean(t.isRetweet)),
+        ("username", User.userEncoder(t.username)),
+        ("lang", Json.fromString(t.lang)),
+        ("url", Json.fromString(t.url))
+      )
+    }
+  }
 }

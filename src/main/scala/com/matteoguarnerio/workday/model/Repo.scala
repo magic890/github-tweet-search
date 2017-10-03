@@ -1,6 +1,7 @@
 package com.matteoguarnerio.workday.model
 
-import io.circe._, io.circe.generic.semiauto._
+import io.circe.{Decoder, Encoder, Json}
+import io.circe.generic.semiauto._
 
 case class Repo(
                name: String,
