@@ -1,5 +1,7 @@
 package com.matteoguarnerio.workday.spark
 
+import java.util
+
 import com.matteoguarnerio.workday.SparkCommons
 import com.matteoguarnerio.workday.model.{Repo, SearchResult, SearchResults, Tweet, User}
 import io.circe.syntax._
@@ -10,7 +12,7 @@ import org.apache.http.impl.client.{CloseableHttpClient, HttpClientBuilder}
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.DataFrame
-import twitter4j.{Query, Status, TwitterFactory}
+import twitter4j.{Query, Status, TwitterException, TwitterFactory}
 
 import scala.collection.{JavaConverters, immutable}
 import scala.concurrent.{Await, Future}
@@ -44,7 +46,8 @@ object SparkOperations extends App {
     val firstResponse: HttpResponse = Await.result(apiPaginationCall(1), scala.concurrent.duration.Duration.Inf)
 
     val headers: Map[String, String] = firstResponse.getAllHeaders.map(h => h.getName -> h.getValue).toMap
-    val otherResponses: Seq[Future[HttpResponse]] = 2 until headers.getOrElse("X-RateLimit-Limit", "10").toInt map(i => {
+    val numRequestToPerform: Int = Math.min(headers.getOrElse("X-RateLimit-Limit", "10").toInt, headers.getOrElse("X-RateLimit-Remaining", "10").toInt)
+    val otherResponses: Seq[Future[HttpResponse]] = 2 until numRequestToPerform + 1 map(i => {
       apiPaginationCall(i)
     })
 
@@ -72,17 +75,33 @@ object SparkOperations extends App {
         case (fn, hu, d) => Repo(fn, hu, d)
       }
 
+    println(s"Read ${numRequestToPerform + 1} GitHub paginated API responses for '$searchStr'")
+
     res
   }
 
   private def searchTwitter(searchStr: String): Future[Seq[Status]] = Future {
     val twitter = TwitterFactory.getSingleton
 
-    val res: Seq[Status] = JavaConverters.collectionAsScalaIterableConverter(
-      twitter.search(new Query(searchStr)).getTweets
-    ).asScala.toSeq
+    val res: Option[util.List[Status]] =
+      try {
+        Option(twitter.search(new Query(searchStr)).getTweets)
+      }
+      catch {
+        case e: TwitterException => {
+          System.err.println(e)
+          None
+        }
+      }
 
-    res
+    val ret: Seq[Status] = res match {
+      case Some(r) => JavaConverters.collectionAsScalaIterableConverter(r).asScala.toSeq
+      case None => Seq.empty
+    }
+
+    println(s"Performed ${ret.size} Twitter searches for '$searchStr'")
+
+    ret
   }
 
   private def startStream(searchQuery: String): Unit = {
