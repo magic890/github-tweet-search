@@ -1,4 +1,4 @@
-package com.matteoguarnerio.workday
+package com.matteoguarnerio
 
 import java.io.{File, PrintWriter}
 
@@ -13,7 +13,7 @@ object SparkCommons {
 
   lazy val conf: SparkConf = new SparkConf()
     .setMaster("local[*]")
-    .setAppName("Workday - GRID Assignment")
+    .setAppName("GitHub Tweet Search")
     .set("spark.driver.port", driverPort.toString)
     .set("spark.driver.host", driverHost)
 

@@ -1,4 +1,4 @@
-name         := "workday-assignment"
+name         := "github-tweet-search"
 
 organization := "com.matteoguarnerio"
 

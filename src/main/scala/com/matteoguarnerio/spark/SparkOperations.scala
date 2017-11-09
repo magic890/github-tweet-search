@@ -1,9 +1,9 @@
-package com.matteoguarnerio.workday.spark
+package com.matteoguarnerio.spark
 
 import java.util
 
-import com.matteoguarnerio.workday.SparkCommons
-import com.matteoguarnerio.workday.model.{Repo, SearchResult, SearchResults, Tweet, User}
+import com.matteoguarnerio.SparkCommons
+import com.matteoguarnerio.model.{Repo, SearchResult, SearchResults, Tweet, User}
 import io.circe.syntax._
 import org.apache.http.HttpResponse
 import org.apache.http.client.config.RequestConfig
@@ -19,7 +19,7 @@ import scala.concurrent.{Await, Future}
 
 object SparkOperations extends App {
 
-  import SparkCommons.ss.implicits._
+  import com.matteoguarnerio.SparkCommons.ss.implicits._
 
   import scala.concurrent.ExecutionContext.Implicits.global
 

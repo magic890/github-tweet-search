@@ -1,4 +1,4 @@
-package com.matteoguarnerio.workday.model
+package com.matteoguarnerio.model
 
 import io.circe.{Decoder, Encoder, Json}
 import io.circe.generic.semiauto._
